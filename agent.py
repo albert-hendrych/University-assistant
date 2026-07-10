@@ -38,10 +38,18 @@ JSON: {"accion": "OTRO", "asignatura": "", "evaluacion": "", "nota": 0.0, "porce
 def analizar_con_ia(mensaje: str) -> dict:
     try:
         response = model.generate_content(
-            f"{SYSTEM_PROMPT}\n\nMensaje del usuario: {mensaje}",
-            generation_config=genai.GenerationConfig(response_mime_type="application/json")
+            f"{SYSTEM_PROMPT}\n\nMensaje del usuario: {mensaje}"
         )
-        return json.loads(response.text)
+        texto = response.text.strip()
+        # Limpiar los bloques de código Markdown (```json ... ```) si la IA los añade
+        if texto.startswith("```json"):
+            texto = texto[7:]
+        elif texto.startswith("```"):
+            texto = texto[3:]
+        if texto.endswith("```"):
+            texto = texto[:-3]
+            
+        return json.loads(texto.strip())
     except Exception as e:
         print(f"Error procesando IA: {e}")
         return {"accion": "ERROR"}
