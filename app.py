@@ -30,6 +30,9 @@ def telegram_webhook():
         
         print(f"Mensaje recibido del chat {chat_id}: {mensaje_usuario}")
         
+        # Mostrar el estado "Escribiendo..." en Telegram
+        enviar_accion_escribiendo(chat_id)
+        
         # 1. Enviar el mensaje al "Cerebro" (Agente de IA) para que lo procese
         respuesta_agente = procesar_mensaje(mensaje_usuario)
         
@@ -37,6 +40,20 @@ def telegram_webhook():
         enviar_mensaje_telegram(chat_id, respuesta_agente)
             
     return "OK", 200
+
+def enviar_accion_escribiendo(chat_id: int):
+    """
+    Muestra el estado 'escribiendo...' en Telegram mientras la IA piensa.
+    """
+    url = f"{TELEGRAM_API_URL}/sendChatAction"
+    payload = {
+        "chat_id": chat_id,
+        "action": "typing"
+    }
+    try:
+        requests.post(url, json=payload, timeout=2)
+    except Exception as e:
+        print(f"Error enviando acción de escribir: {e}")
 
 def enviar_mensaje_telegram(chat_id: int, texto: str):
     """
