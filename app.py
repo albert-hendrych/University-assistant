@@ -13,61 +13,67 @@ TELEGRAM_API_URL = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}"
 
 @app.route('/', methods=['GET'])
 def index():
-    return "Asistente Universitario Activo y funcionando en la nube 🤖☁️", 200
+    return "Asistente Universitario Activo 🤖☁️", 200
 
 @app.route('/webhook', methods=['POST'])
 def telegram_webhook():
-    """
-    Este endpoint recibe los mensajes que los usuarios envían a tu bot en Telegram.
-    Telegram hace una petición HTTP POST aquí en cuanto recibe un mensaje.
-    """
     update = request.get_json()
     
-    # Asegurarnos de que hay un mensaje de texto
     if update and "message" in update and "text" in update["message"]:
         chat_id = update["message"]["chat"]["id"]
         mensaje_usuario = update["message"]["text"]
         
-        print(f"Mensaje recibido del chat {chat_id}: {mensaje_usuario}")
+        print(f"Missatge rebut del xat {chat_id}: {mensaje_usuario}")
         
-        # Mostrar el estado "Escribiendo..." en Telegram
-        enviar_accion_escribiendo(chat_id)
+        # 1. Enviar missatge temporal ("⏳ Pensant...") a Telegram
+        message_id = enviar_mensaje_carga(chat_id)
         
-        # 1. Enviar el mensaje al "Cerebro" (Agente de IA) para que lo procese
+        # 2. Enviar el missatge al "Cervell" (Agent IA amb context sencer)
         respuesta_agente = procesar_mensaje(mensaje_usuario)
         
-        # 2. Responder al usuario en Telegram
-        enviar_mensaje_telegram(chat_id, respuesta_agente)
+        # 3. Editar el missatge original i posar-hi la resposta definitiva
+        if message_id:
+            editar_mensaje_telegram(chat_id, message_id, respuesta_agente)
+        else:
+            # Fallback per si no s'ha pogut crear el primer missatge
+            enviar_mensaje_telegram(chat_id, respuesta_agente)
             
     return "OK", 200
 
-def enviar_accion_escribiendo(chat_id: int):
-    """
-    Muestra el estado 'escribiendo...' en Telegram mientras la IA piensa.
-    """
-    url = f"{TELEGRAM_API_URL}/sendChatAction"
+def enviar_mensaje_carga(chat_id: int) -> int:
+    url = f"{TELEGRAM_API_URL}/sendMessage"
     payload = {
         "chat_id": chat_id,
-        "action": "typing"
+        "text": "⏳ _Llegint la base de dades i fent càlculs..._",
+        "parse_mode": "Markdown"
     }
     try:
-        requests.post(url, json=payload, timeout=2)
+        r = requests.post(url, json=payload, timeout=5)
+        if r.status_code == 200:
+            return r.json().get("result", {}).get("message_id")
     except Exception as e:
-        print(f"Error enviando acción de escribir: {e}")
+        print(f"Error enviant missatge de càrrega: {e}")
+    return None
+
+def editar_mensaje_telegram(chat_id: int, message_id: int, texto: str):
+    url = f"{TELEGRAM_API_URL}/editMessageText"
+    payload = {
+        "chat_id": chat_id,
+        "message_id": message_id,
+        "text": texto,
+        "parse_mode": "Markdown"
+    }
+    requests.post(url, json=payload)
 
 def enviar_mensaje_telegram(chat_id: int, texto: str):
-    """
-    Envía un mensaje de vuelta al usuario a través de la API HTTP de Telegram.
-    """
     url = f"{TELEGRAM_API_URL}/sendMessage"
     payload = {
         "chat_id": chat_id,
         "text": texto,
-        "parse_mode": "Markdown" # Permite usar negritas (*texto*) y cursivas (_texto_) en Telegram
+        "parse_mode": "Markdown"
     }
     requests.post(url, json=payload)
 
 if __name__ == '__main__':
-    # Puerto dinámico para plataformas Cloud como Render
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port, debug=True)

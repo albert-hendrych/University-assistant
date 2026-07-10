@@ -2,44 +2,45 @@ import os
 import json
 import re
 import google.generativeai as genai
-from sheets_db import guardar_nota, obtener_resumen, calcular_necesario
+from sheets_db import leer_excel_como_texto, ejecutar_modificaciones
 
 genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
 
 model = genai.GenerativeModel('gemini-flash-latest')
 
 SYSTEM_PROMPT = """
-Ets el cervell d'un bot de Telegram universitari. L'usuari et parlarà sobre les seves notes. L'idioma principal és el català.
-Has d'extreure la intenció i retornar SEMPRE i ÚNICAMENT un JSON vàlid amb aquesta estructura, sense cap text addicional fora de les claus:
+Ets el cervell d'un bot de Telegram universitari superintel·ligent. El teu idioma és el català.
+Rebràs el missatge de l'usuari i l'Estat Actual de la Base de Dades (l'Excel amb les notes).
 
+Les columnes de l'Excel solen ser: Asignatura | Tipo (o Avaluació) | Porcentaje | Nota.
+
+EL TEU OBJECTIU:
+1. Llegir l'estat de la base de dades per entendre el context (quina nota té ja, què li falta, etc).
+2. Si l'usuari fa una pregunta sobre el seu estat o simulacions (ex: "Què passa si trec un 8 a Mates?"), TU faràs els càlculs matemàtics mentalment observant les dades de l'Excel, i generaràs la resposta explicant si aprova, quant li falta, o si falten notes per calcular (ex: falten pràctiques).
+3. Si l'usuari vol crear l'estructura d'una assignatura (ex: "Mates s'avalua 30% parcial, 40% final i 3 pràctiques del 10%"), o si vol afegir/modificar una nota real (ex: "He tret un 8 a la pràctica 1 de Mates"), generaràs accions de modificació per a la base de dades.
+
+FORMAT DE SORTIDA OBLIGATORI (només un JSON, sense cap altre text a fora de les claus):
 {
-  "accion": "GUARDAR_NOTA" | "CONSULTAR_NOTA" | "CALCULAR_FINAL" | "OTRO",
-  "asignatura": "Nom de l'assignatura (buit si no aplica)",
-  "tipo": "Nom de l'examen o pràctica (buit si no aplica)",
-  "nota": 8.5 (número float, usa punt per decimals, si no hi ha posa 0.0),
-  "porcentaje": 20.0 (número float en base 100, ex: 20 per a 20%, si no hi ha posa 0.0),
-  "respuesta_conversacional": "Missatge amable en català en cas que l'acció sigui OTRO"
+  "modificaciones_excel": [
+    {"accion": "NUEVA_FILA", "asignatura": "NomAssignatura", "tipo": "NomProva", "porcentaje": 30, "nota": ""},
+    {"accion": "ACTUALIZAR_CELDA", "fila": 5, "columna": 4, "valor": 8.5}
+  ],
+  "respuesta_telegram": "Missatge en català responent a l'usuari. Inclou aquí tots els teus raonaments, càlculs, i confirmacions de les accions. Utilitza format Telegram (negretes, emojis)."
 }
 
-Exemples:
-User: "He tret un 10'2 en l'examen final d'aprenentatge automàtic que val un 60%"
-JSON: {"accion": "GUARDAR_NOTA", "asignatura": "Aprenentatge automàtic", "tipo": "Examen final", "nota": 10.2, "porcentaje": 60.0, "respuesta_conversacional": ""}
-
-User: "Quines notes tinc a Física?"
-JSON: {"accion": "CONSULTAR_NOTA", "asignatura": "Física", "tipo": "", "nota": 0.0, "porcentaje": 0.0, "respuesta_conversacional": ""}
-
-User: "Hola!"
-JSON: {"accion": "OTRO", "asignatura": "", "tipo": "", "nota": 0.0, "porcentaje": 0.0, "respuesta_conversacional": "Hola! Estic a punt per gestionar les teves notes. Què necessites?"}
+*NOTES IMPORTANTS:*
+- `modificaciones_excel` pot estar buit `[]` si l'usuari només fa consultes o simulacions sense guardar res.
+- Si actualitzes una nota d'una fila que ja existeix, fes servir `ACTUALIZAR_CELDA`. Fixa't en quin número de fila exacte és (al CSV posa "Fila X:"). La 'columna' de la Nota és la 4.
+- Si et falten dades per fer un càlcul (ex: l'usuari et demana la nota final però només ha registrat 3 de 4 pràctiques o li falta l'examen), ho has de deduir llegint el CSV i dir-li amablement a la `respuesta_telegram` què li falta exactament per tenir el càlcul precís.
 """
 
-def analizar_con_ia(mensaje: str) -> dict:
+def analizar_con_ia(mensaje: str, bd_context: str) -> dict:
     try:
-        response = model.generate_content(
-            f"{SYSTEM_PROMPT}\n\nMissatge de l'usuari: {mensaje}"
-        )
+        prompt_completo = f"{SYSTEM_PROMPT}\n\n--- ESTAT ACTUAL DE L'EXCEL ---\n{bd_context}\n\n--- MISSATGE DE L'USUARI ---\n{mensaje}"
+        
+        response = model.generate_content(prompt_completo)
         texto = response.text.strip()
         
-        # Expressió regular super robusta per extreure només el JSON i ignorar "Aquí tienes el JSON..."
         match = re.search(r'\{.*\}', texto, re.DOTALL)
         if match:
             texto_json = match.group(0)
@@ -49,61 +50,22 @@ def analizar_con_ia(mensaje: str) -> dict:
         return json.loads(texto_json)
     except Exception as e:
         print(f"Error processant IA: {e}")
-        return {"accion": "ERROR"}
+        return None
 
 def procesar_mensaje(mensaje: str) -> str:
-    datos = analizar_con_ia(mensaje)
-    accion = datos.get("accion")
-    asignatura = str(datos.get("asignatura", "")).capitalize()
+    # 1. Llegir l'Excel sencer
+    bd_context = leer_excel_como_texto()
     
-    if accion == "GUARDAR_NOTA":
-        tipo = datos.get("tipo", "Avaluació")
+    # 2. Passar-ho a la IA
+    datos_ia = analizar_con_ia(mensaje, bd_context)
+    
+    if not datos_ia:
+        return "🤖 Mmmm, sembla que tinc un bloqueig mental. No he pogut analitzar bé les teves notes ara mateix."
         
-        # Robustesa per si Gemini retorna text o comes
-        try:
-            nota = float(str(datos.get("nota", "0")).replace(",", "."))
-            porc = float(str(datos.get("porcentaje", "0")).replace(",", "."))
-        except:
-            nota = 0.0
-            porc = 0.0
-            
-        exito = guardar_nota(asignatura, tipo, porc, nota)
-        if exito:
-            return f"✅ **Anotat!**\n📚 {asignatura}\n📝 {tipo}: **{nota}** (Val un {porc}%)"
-        else:
-            return "❌ Hi ha hagut un error en guardar a l'Excel. Verifica que l'arxiu té les columnes correctes ('Asignatura', 'Tipo', 'Porcentaje', 'Nota') i els permisos adequats."
-            
-    elif accion == "CONSULTAR_NOTA":
-        notas = obtener_resumen(asignatura)
-        if not notas:
-            return f"No he trobat notes per a **{asignatura}** al teu Excel 🕵️‍♂️"
-            
-        texto = f"📊 **Resum de {asignatura}**\n\n"
-        for n in notas:
-            texto += f"🔹 {n.get('Tipo', 'Prova')}: **{n.get('Nota', 0)}** (_{n.get('Porcentaje', 0)}%_)\n"
-        return texto
+    # 3. Aplicar canvis a l'Excel
+    modificaciones = datos_ia.get("modificaciones_excel", [])
+    if modificaciones:
+        ejecutar_modificaciones(modificaciones)
         
-    elif accion == "CALCULAR_FINAL":
-        calculo = calcular_necesario(asignatura)
-        if not calculo:
-            return f"Encara no hi ha notes registrades a **{asignatura}** per fer el càlcul."
-            
-        acumulada = round(calculo["acumulada"], 2)
-        restante = round(calculo["restante"], 2)
-        necesaria = round(calculo["necesaria"], 2)
-        
-        if calculo["aprobada"]:
-            return f"🎉 Ja tens un **{acumulada}** acumulat a {asignatura}! Estàs aprobadíssim/a."
-        
-        if restante <= 0:
-            return f"Ja s'ha avaluat el 100% de l'assignatura. La teva nota final és un **{acumulada}**."
-            
-        if necesaria > 10:
-            return f"⚠️ Matemàticament impossible... Necessitaries un **{necesaria}** en el {restante}% que queda per arribar al 5.0. A per la recu! 💪"
-            
-        return f"📐 **Càlcul per a {asignatura}**\n\nDuus acumulat un **{acumulada}** sobre 10.\nEt queda un **{restante}%** per avaluar.\n\n🎯 Necessites treure almenys un **{necesaria}** en el que queda per aprovar amb un 5."
-        
-    elif accion == "OTRO":
-        return datos.get("respuesta_conversacional", "Hola! Digues-me si vols guardar una nota o consultar com vas en una assignatura.")
-        
-    return "🤖 Mmmm, no he pogut processar el teu missatge. Sembla un error al cervell de Gemini. Torna-ho a provar."
+    # 4. Retornar resposta a l'usuari
+    return datos_ia.get("respuesta_telegram", "Fet! He pres nota del que m'has dit.")

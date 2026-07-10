@@ -20,57 +20,47 @@ def obtener_hoja():
     sh = gc.open_by_url(url)
     return sh.sheet1
 
-def guardar_nota(asignatura, evaluacion, porcentaje, nota):
+def leer_excel_como_texto() -> str:
+    """Retorna tot l'Excel com un text (CSV) per donar-li de context a Gemini."""
     try:
         hoja = obtener_hoja()
-        hoja.append_row([asignatura, evaluacion, porcentaje, nota])
-        return True
-    except Exception as e:
-        print(f"Error guardando nota: {e}")
-        return False
-
-def obtener_resumen(asignatura):
-    try:
-        hoja = obtener_hoja()
-        registros = hoja.get_all_records()
-        notas_asignatura = [r for r in registros if str(r.get("Asignatura", "")).lower() == asignatura.lower()]
-        return notas_asignatura
-    except Exception as e:
-        print(f"Error obteniendo resumen: {e}")
-        return []
-
-def calcular_necesario(asignatura):
-    # Calcula la nota necesaria para el porcentaje restante asumiendo que se busca un 5.0
-    notas = obtener_resumen(asignatura)
-    if not notas:
-        return None
-    
-    nota_acumulada = 0.0
-    porcentaje_acumulado = 0.0
-    
-    for n in notas:
-        try:
-            porc = float(str(n.get("Porcentaje", 0)).replace("%", "").strip())
-            nota = float(str(n.get("Nota", 0)).replace(",", ".").strip())
-            # Si el porcentaje está en base 100 (ej. 20), lo pasamos a 0.2
-            if porc > 1.0:
-                porc = porc / 100.0
-            
-            nota_acumulada += nota * porc
-            porcentaje_acumulado += porc
-        except Exception:
-            pass
-            
-    porcentaje_restante = 1.0 - porcentaje_acumulado
-    
-    if porcentaje_restante <= 0:
-        return {"acumulada": nota_acumulada, "restante": 0, "necesaria": 0, "aprobada": nota_acumulada >= 5.0}
+        valores = hoja.get_all_values()
+        if not valores:
+            return "L'Excel està buit. Les columnes haurien de ser: Asignatura, Tipo, Porcentaje, Nota"
         
-    nota_necesaria = (5.0 - nota_acumulada) / porcentaje_restante
-    
-    return {
-        "acumulada": nota_acumulada,
-        "restante": porcentaje_restante * 100,
-        "necesaria": nota_necesaria,
-        "aprobada": nota_acumulada >= 5.0
-    }
+        texto = ""
+        for i, fila in enumerate(valores):
+            # i+1 per tenir el número real de la fila (com a Sheets)
+            texto += f"Fila {i+1}: " + " | ".join([str(v) for v in fila]) + "\n"
+        return texto
+    except Exception as e:
+        print(f"Error llegint l'excel: {e}")
+        return "Error llegint la base de dades."
+
+def ejecutar_modificaciones(acciones: list):
+    """Executa les instruccions que Gemini ens envia en el JSON."""
+    if not acciones:
+        return
+        
+    try:
+        hoja = obtener_hoja()
+        for accion in acciones:
+            tipo_acc = accion.get("accion")
+            
+            if tipo_acc == "NUEVA_FILA":
+                asig = accion.get("asignatura", "")
+                tipo = accion.get("tipo", "")
+                porc = accion.get("porcentaje", "")
+                nota = accion.get("nota", "")
+                hoja.append_row([asig, tipo, porc, nota])
+                
+            elif tipo_acc == "ACTUALIZAR_CELDA":
+                fila = accion.get("fila")
+                # Assumim que modifiquem la columna 4 (Nota), si Gemini no diu el contrari
+                columna = accion.get("columna", 4)
+                valor = accion.get("valor", "")
+                if fila:
+                    hoja.update_cell(fila, columna, valor)
+                    
+    except Exception as e:
+        print(f"Error modificant l'excel: {e}")
