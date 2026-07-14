@@ -49,6 +49,10 @@ def analizar_con_ia(mensaje: str, bd_context: str) -> dict:
             
         return json.loads(texto_json)
     except Exception as e:
+        error_msg = str(e).lower()
+        if "429" in error_msg or "quota" in error_msg or "rate limit" in error_msg:
+            print(f"Error de quota IA: {e}")
+            return {"respuesta_telegram": "⚠️ He arribat al límit de missatges per minut de la versió gratuïta de Gemini (5 per minut). Espera uns 60 segons i torna-ho a provar! ⏳"}
         print(f"Error processant IA: {e}")
         return None
 

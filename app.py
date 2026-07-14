@@ -15,6 +15,8 @@ TELEGRAM_API_URL = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}"
 def index():
     return "Asistente Universitario Activo 🤖☁️", 200
 
+import threading
+
 @app.route('/webhook', methods=['POST'])
 def telegram_webhook():
     update = request.get_json()
@@ -25,20 +27,26 @@ def telegram_webhook():
         
         print(f"Missatge rebut del xat {chat_id}: {mensaje_usuario}")
         
-        # 1. Enviar missatge temporal ("⏳ Pensant...") a Telegram
-        message_id = enviar_mensaje_carga(chat_id)
-        
-        # 2. Enviar el missatge al "Cervell" (Agent IA amb context sencer)
-        respuesta_agente = procesar_mensaje(mensaje_usuario)
-        
-        # 3. Editar el missatge original i posar-hi la resposta definitiva
-        if message_id:
-            editar_mensaje_telegram(chat_id, message_id, respuesta_agente)
-        else:
-            # Fallback per si no s'ha pogut crear el primer missatge
-            enviar_mensaje_telegram(chat_id, respuesta_agente)
+        # Processem el missatge en un fil en segon pla per retornar el "200 OK" a Telegram immediatament.
+        # Si no ho fem així, Telegram es pensa que hem fallat per timeout i reenvia el mateix missatge 3 o 4 vegades,
+        # esgotant el límit de la API de Gemini (5 RPM) a l'instant!
+        threading.Thread(target=processar_en_fons, args=(chat_id, mensaje_usuario)).start()
             
     return "OK", 200
+
+def processar_en_fons(chat_id, mensaje_usuario):
+    # 1. Enviar missatge temporal ("⏳ Pensant...") a Telegram
+    message_id = enviar_mensaje_carga(chat_id)
+    
+    # 2. Enviar el missatge al "Cervell" (Agent IA amb context sencer)
+    respuesta_agente = procesar_mensaje(mensaje_usuario)
+    
+    # 3. Editar el missatge original i posar-hi la resposta definitiva
+    if message_id:
+        editar_mensaje_telegram(chat_id, message_id, respuesta_agente)
+    else:
+        # Fallback per si no s'ha pogut crear el primer missatge
+        enviar_mensaje_telegram(chat_id, respuesta_agente)
 
 def enviar_mensaje_carga(chat_id: int) -> int:
     url = f"{TELEGRAM_API_URL}/sendMessage"
