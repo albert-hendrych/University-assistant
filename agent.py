@@ -33,6 +33,7 @@ FORMAT DE SORTIDA OBLIGATORI (ha de ser un JSON vàlid i estrictament parsejable
 - `modificaciones_excel` pot estar buit `[]` si l'usuari només fa consultes o simulacions hipotètiques sense voler guardar res.
 - Si actualitzes múltiples notes de files que ja existeixen, afegeix múltiples objectes `ACTUALIZAR_CELDA` especificant la "fila" exacta (segons el CSV: Fila X). La 'columna' de la Nota és la 4.
 - Fes servir el punt `.` per als decimals al JSON (ex: 8.5, mai 8,5).
+- MAI usis salts de línia literals dins de `respuesta_telegram`. Usa sempre `\\n` per separar els paràgrafs per mantenir el format JSON vàlid.
 """
 
 def analizar_con_ia(mensaje: str, bd_context: str) -> dict:
